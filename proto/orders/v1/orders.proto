@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+package orders.v1;
+
+option go_package = "github.com/mustafaautomation/grpc-messaging-tests/gen/orders/v1;ordersv1";
+
+// OrderService accepts orders and reports their fulfilment status.
+// Creating an order publishes an event; a separate worker fulfils or rejects it.
+service OrderService {
+  // CreateOrder is idempotent per idempotency_key: a retry with the same key and
+  // payload returns the original order with replayed = true.
+  rpc CreateOrder(CreateOrderRequest) returns (CreateOrderResponse);
+  rpc GetOrder(GetOrderRequest) returns (GetOrderResponse);
+  // WatchOrder streams the current status, then every change, and ends once the
+  // order reaches a terminal status (fulfilled or rejected).
+  rpc WatchOrder(WatchOrderRequest) returns (stream WatchOrderResponse);
+}
+
+enum OrderStatus {
+  ORDER_STATUS_UNSPECIFIED = 0;
+  ORDER_STATUS_PENDING = 1;
+  ORDER_STATUS_FULFILLED = 2;
+  ORDER_STATUS_REJECTED = 3;
+}
+
+message LineItem {
+  string sku = 1;
+  int32 quantity = 2;
+  int64 unit_price_cents = 3;
+}
+
+message Order {
+  string id = 1;
+  string customer_id = 2;
+  repeated LineItem items = 3;
+  int64 total_cents = 4;
+  OrderStatus status = 5;
+  // Set when status is ORDER_STATUS_REJECTED.
+  string reject_reason = 6;
+}
+
+message CreateOrderRequest {
+  string idempotency_key = 1;
+  string customer_id = 2;
+  repeated LineItem items = 3;
+}
+
+message CreateOrderResponse {
+  Order order = 1;
+  bool replayed = 2;
+}
+
+message GetOrderRequest {
+  string id = 1;
+}
+
+message GetOrderResponse {
+  Order order = 1;
+}
+
+message WatchOrderRequest {
+  string id = 1;
+}
+
+message WatchOrderResponse {
+  string order_id = 1;
+  OrderStatus status = 2;
+  string reject_reason = 3;
+}

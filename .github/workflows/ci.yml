@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.15.0
+
+  proto:
+    name: Protobuf lint, breaking-change and codegen checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
+      - name: buf lint
+        run: buf lint
+      - name: buf breaking (against main)
+        if: github.event_name == 'pull_request'
+        run: buf breaking --against ".git#branch=origin/main"
+      - name: Generated code is up to date
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2
+          buf generate
+          git diff --exit-code -- gen/
+
+  test:
+    name: Tests (race detector)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: go vet
+        run: go vet ./...
+      - name: go test -race
+        run: go test -race -count=1 -coverpkg=./internal/... -coverprofile=coverage.out ./...
+      - name: Coverage
+        run: go tool cover -func=coverage.out | tail -1 | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Fuzz order validation (30s)
+        run: go test -run='^$' -fuzz=FuzzValidate -fuzztime=30s ./internal/orders
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: coverage
+          path: coverage.out
